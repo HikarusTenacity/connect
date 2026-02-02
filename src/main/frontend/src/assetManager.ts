@@ -1,6 +1,6 @@
 // Helper to always produce an absolute public path like '/models/props/o_piece.glb'
 function publicPath(...parts: string[]) {
-  const clean = parts.map(p => String(p || '').replace(/^\/+/g, '').replace(/\/+$/g, ''))
+  const clean = ['assets', ...parts].map(p => String(p || '').replace(/^\/+/g, '').replace(/\/+$/g, ''))
                    .filter(Boolean)
                    .join('/');
   return '/' + clean;
@@ -38,7 +38,7 @@ export default class AssetManager {
             // Project assets detected in src/main/frontend/assets
             { key: 'player-json', type: 'json', url: publicPath('player.json') },
             // music
-            { key: 'music-urout', type: 'audio', url: this.getMusicPath('urout.ogg') }
+            { key: 'music_urout', type: 'audio', url: this.getMusicPath('urout.ogg') }
         ];
         console.log("loaded player + music");
         if (includeModels) {

@@ -28,6 +28,7 @@ export default class GameScene {
     currentPlayer: 'X' | 'O';
     rankedHints: any[];
     activeDrops: any[];
+    audio: HTMLAudioElement | null = null;
         //asset management
     assetManager: AssetManager;
 
@@ -217,6 +218,14 @@ export default class GameScene {
         this.buildBoardMesh();
         this.createHoverMesh();
         this.updatePieces();
+
+        this.audio = (this as any).audio_music_urout;
+        console.log('Audio assigned:', this.audio);
+        if (this.audio) {
+            this.audio.loop = true;
+            this.audio.volume = 0.3;
+            this.audio.play().catch(() => { /* browsers require user interaction */ });
+        }
     }
 
     // Simplified asset loader: loads images into textures if possible, but never rejects
@@ -269,6 +278,21 @@ export default class GameScene {
                     undefined, 
                     () => { 
                         res(); 
+                    });
+                });
+                tasks.push(loadTask);
+            } else if (asset.type === 'audio') {
+                const loadTask = new Promise<void>((res) => {
+                    const audio = new Audio(asset.url);
+                    audio.addEventListener('canplaythrough', () => {
+                        console.log('Audio loaded successfully for', asset.key);
+                        (this as any)[`audio_${asset.key}`] = audio;
+                        res();
+                    });
+                    audio.addEventListener('error', () => {
+                        console.log('Audio load failed for', asset.key);
+                        (this as any)[`audio_${asset.key}`] = null;
+                        res();
                     });
                 });
                 tasks.push(loadTask);
@@ -391,6 +415,13 @@ export default class GameScene {
             // fire-and-forget AI move
             void this.requestAIMove();
         }
+
+        // Start music on first user interaction
+        console.log('Audio state before play:', this.audio, this.audio?.paused);
+        if (this.audio && this.audio.paused) {
+            console.log('Starting background music');
+            this.audio.play().catch(() => {});
+        }
     }
 
     getRowForCol(col: number): number | null {
@@ -401,24 +432,29 @@ export default class GameScene {
     }
 
     updatePieces() {
+         // Remove all existing piece meshes from the scene
         const toRemove: any[] = [];
         this.scene.traverse((obj: any) => { 
-            if (obj?.userData?.isPiece) toRemove.push(obj); 
+            if (obj?.userData?.isPiece) { //basically if it exists and is marked as a piece
+                toRemove.push(obj);
+            }
         });
-        toRemove.forEach(o => { 
-            this.scene.remove(o); 
-        });
+        for (const element of toRemove) {
+            this.scene.remove(element);
+        }
 
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                const val = this.board.board[r][c];
+        // Add pieces based on the current board state
+        for (let row = 0; row < ROWS; row++) {
+            for (let col = 0; col < COLS; col++) {
+                const val = this.board.board[row][col];
+
                 if (val === '_') continue;
 
                 // try model first
                 const modelKey = `model_piece-${val.toLowerCase()}`;
                 const model = (this as any)[modelKey];
-                const cx = (c - (COLS - 1) / 2) * CELL_SIZE;
-                const cy = ((ROWS - 1) / 2 - r) * CELL_SIZE;
+                const cx = (col - (COLS - 1) / 2) * CELL_SIZE;
+                const cy = ((ROWS - 1) / 2 - row) * CELL_SIZE;
                 if (model) {
                     const instance = model.clone(true);
                     const scale = CELL_SIZE * PIECE_SCALE;
@@ -442,17 +478,28 @@ export default class GameScene {
                                     n.material.side = (THREE as any).DoubleSide; 
                                     n.material.needsUpdate = true; 
                                 } 
-                            } catch(e) {}
+                            } catch(e) {
+                                console.warn('Could not set piece material color', e);
+                            }
                         }
                     });
                     // add a simple blob shadow under the piece to create depth
                     const shadowGeom = new THREE.CircleGeometry(CELL_SIZE * 0.45, 32);
-                    const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 });
+                    const shadowMat = new THREE.MeshBasicMaterial({
+                        color: 0x000000,
+                        transparent: true,
+                        opacity: 0.35
+                    });
                     const shadowMesh = new THREE.Mesh(shadowGeom, shadowMat);
                     shadowMesh.position.set(cx, cy, 0.055);
-                    shadowMesh.userData = { isPiece: true, isShadow: true };
+                    shadowMesh.userData = {
+                        isPiece: true,
+                        isShadow: true
+                    };
                     this.scene.add(shadowMesh);
-                    instance.userData = { isPiece: true };
+                    instance.userData = {
+                        isPiece: true
+                    };
                     this.scene.add(instance);
                     continue;
                 }
@@ -556,6 +603,7 @@ export default class GameScene {
             const data = await resp.json();
             if (data?.rankedMoves) this.showRankedMoveHints(data.rankedMoves);
             if (typeof data?.move === 'number' && data.move >= 0) {
+                console.log('AI chose move:', data.move, ", because:", data.explanation);
                 this.board.drop(data.move, 'O');
                 this.updatePieces();
             }
@@ -566,18 +614,24 @@ export default class GameScene {
     }
 
     showRankedMoveHints(rankedMoves: any[]) {
-        this.rankedHints.forEach(h => this.scene.remove(h));
+        this.rankedHints.forEach(h => this.scene.remove(h)); // remove old hints
         this.rankedHints = [];
         for (let i = 0; i < Math.min(3, rankedMoves.length); i++) {
             const rankedMove = rankedMoves[i];
             const col = rankedMove.move;
             const cx = (col - (COLS - 1) / 2) * CELL_SIZE;
-            const geom = new THREE.CircleGeometry(CELL_SIZE * 0.28 * (1 - i*0.12), 32);
-            const colors = [0xfdd835, 0xb0bec5, 0xffab91];
+            const hintSize = CELL_SIZE * 0.28 * (1 - i*0.12);
+            const geom = new THREE.CircleGeometry(hintSize, 32); // slightly smaller for lower ranks
+            const colors = [
+                0xfdd835, // gold for best move
+                0xb0bec5, // silver for second best
+                0xffab91 // bronze for third best (ewwwww)
+            ];
+
             const mat = new THREE.MeshBasicMaterial({ 
                 color: colors[i], 
                 transparent: true, 
-                opacity: 0.85 - i*0.15 
+                opacity: 0.85 - i*0.15 // slightly decrease opacity for lower ranks
             });
             const rankedMesh = new THREE.Mesh(geom, mat);
             rankedMesh.position.set(cx, (BOARD_HEIGHT / 2) + CELL_SIZE * 0.25, 0.05);
@@ -587,20 +641,24 @@ export default class GameScene {
     }
 
     resize() {
-        const w = Math.max(1, Math.floor(this.container.clientWidth));
-        const h = Math.max(1, Math.floor(this.container.clientHeight));
-        const dpr = window.devicePixelRatio || 1;
-        this.renderer.setSize(w, h, false);
-        this.renderer.setPixelRatio(dpr);
+        const width = Math.max(1, Math.floor(this.container.clientWidth));
+        const height = Math.max(1, Math.floor(this.container.clientHeight));
+        const devicePixelRatio = window.devicePixelRatio || 1;
+        this.renderer.setSize(width, height, false);
+        this.renderer.setPixelRatio(devicePixelRatio);
         this.renderer.domElement.style.width = '100%';
         this.renderer.domElement.style.height = '100%';
         // update perspective camera aspect
         if (this.camera.isPerspectiveCamera) {
-            this.camera.aspect = w / h;
+            this.camera.aspect = width / height;
             this.camera.updateProjectionMatrix();
         } else {
             // Keep compatibility if some other camera type is used
-            try { this.camera.updateProjectionMatrix(); } catch (e) { /* ignore */ }
+            try {
+                this.camera.updateProjectionMatrix();
+            } catch (e) {
+                console.warn('Could not update camera projection matrix', e);
+            }
         }
     }
 
@@ -609,17 +667,24 @@ export default class GameScene {
         if (!(this as any).__firstFrameLogged) {
             (this as any).__firstFrameLogged = true;
             // log some info about the canvas if available; use optional chaining to avoid exceptions
-            console.log('First render frame — canvas (client):', this.renderer?.domElement?.clientWidth, this.renderer?.domElement?.clientHeight, 'canvas (px):', this.renderer?.domElement?.width, this.renderer?.domElement?.height);
+            console.log('First render frame — canvas (client):',
+                this.renderer?.domElement?.clientWidth,
+                this.renderer?.domElement?.clientHeight,
+                'canvas (px):',
+                this.renderer?.domElement?.width,
+                this.renderer?.domElement?.height
+            );
         }
 
         if (this.activeDrops.length > 0) {
             for (let i = this.activeDrops.length - 1; i >= 0; i--) {
-                const a = this.activeDrops[i];
-                const mesh = a.mesh;
-                // dropping along Y axis for upright board
-                mesh.position.y = Math.max(a.targetY, mesh.position.y - a.speed);
-                a.speed += 0.0015;
-                if (mesh.position.y <= a.targetY + 0.001) {
+                const activeDrop = this.activeDrops[i];
+                const mesh = activeDrop.mesh;
+
+                mesh.position.y = Math.max(activeDrop.targetY, mesh.position.y - activeDrop.speed); // drop down by speed but not below target
+                activeDrop.speed += 0.0015; // accelerate drop speed slightly
+
+                if (mesh.position.y <= activeDrop.targetY + 0.001) { // reached target
                     this.scene.remove(mesh);
                     this.activeDrops.splice(i, 1);
                     this.updatePieces();
@@ -627,17 +692,28 @@ export default class GameScene {
             }
         }
 
-        if (this.hoverMesh) {
-            this.hoverMesh.position.x += (this.hoverTargetX - this.hoverMesh.position.x) * 0.15;
-            this.hoverMesh.position.y += (this.hoverTargetY - this.hoverMesh.position.y) * 0.15;
+        if (this.hoverMesh) { // if hoverMesh exists
+            const SEfactor = .15; // smooth hover movement towards target using simple easing
+            this.hoverMesh.position.x += (this.hoverTargetX - this.hoverMesh.position.x) * SEfactor;
+            this.hoverMesh.position.y += (this.hoverTargetY - this.hoverMesh.position.y) * SEfactor;
         }
-        const t = performance.now() / 300;
-        for (let i = 0; i < this.rankedHints.length; i++) {
-            const h = this.rankedHints[i];
-            h.position.y = (BOARD_HEIGHT / 2) + CELL_SIZE * 0.25 + Math.sin(t + i) * 0.03;
+
+        // animate ranked hints with a bobbing effect
+        const time = performance.now() / 300;
+        const hintBobAmplitude = 0.03;
+        for (let hintI = 0; hintI < this.rankedHints.length; hintI++) {
+            const hintMesh = this.rankedHints[hintI];
+            hintMesh.position.y = (BOARD_HEIGHT / 2) + CELL_SIZE * 0.25 + Math.sin(time + hintI) * hintBobAmplitude;
         }
+
         // update controls if present
-        try { (this as any)._controls?.update(); } catch (e) {}
+        try {
+            (this as any)._controls?.update();
+        } catch (e) {
+            console.log('Could not update controls', e);
+        }
+
+        // render the scene
         this.renderer.render(this.scene, this.camera);
     }
 

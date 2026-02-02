@@ -147,14 +147,14 @@ public class AIPlayer {
         String pickRankText = (pickedIndex >= 0) ? String.format("%d", pickedIndex + 1) : "?";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("roll=").append(String.format("%.4f", roll));
-        sb.append(" accuracy=").append(String.format("%.4f", accuracy));
-        sb.append(" severity=").append(String.format("%.4f", severity));
-        if (temperature > 0) sb.append(" temperature=").append(String.format("%.4f", temperature));
-        sb.append(" chosenRank=").append(pickRankText);
-        sb.append(" weightsSum=").append(String.format("%.4f", weightSum));
-        sb.append(" moves=[").append(movesStr).append("]");
-        sb.append(" reason=").append(reason);
+        sb.append("Reason: ").append(reason).append("\n");
+        sb.append("Roll: ").append(String.format("%.4f", roll)).append("\n");
+        sb.append("Accuracy: ").append(String.format("%.4f", accuracy)).append("\n");
+        sb.append("Severity: ").append(String.format("%.4f", severity)).append("\n");
+        if (temperature > 0) sb.append("Temperature: ").append(String.format("%.4f", temperature)).append("\n");
+        sb.append("Chosen Rank: ").append(pickRankText).append("\n");
+        sb.append("Weights Sum: ").append(String.format("%.4f", weightSum)).append("\n");
+        sb.append("Moves: [").append(movesStr);
         return sb.toString();
     }
 
